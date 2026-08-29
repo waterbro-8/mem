@@ -1,0 +1,47 @@
+# Smithery configuration file: https://smithery.ai/docs/build/project-config
+#
+# Carrier note: mem-mcp is a Go stdio binary, so it rides Smithery's Node
+# runner through the npm wrapper package (issue #104 G4). Validation of this
+# file cannot pass until @fullstack-ai-infra/mem-mcp is published.
+
+startCommand:
+  type: stdio
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - serverUrl
+      - token
+    properties:
+      serverUrl:
+        type: string
+        description: "Base URL of the memd HTTP API that this server proxies tool calls to (forwarded as MEM_SERVER). E.g. http://localhost:8787 for a local compose deployment."
+        default: "http://localhost:8787"
+      token:
+        type: string
+        description: "Bearer token created with `mem auth token create` (forwarded as MEM_TOKEN). Required for any non-public operation; scopes remember=search write, search/context search, read read, feedback and archive read+write, forget delete."
+        format: password
+      workspace:
+        type: string
+        description: "Optional memory workspace UUID to pin all calls to (forwarded as MEM_WORKSPACE). Omit to use the token's personal workspace."
+  commandFunction:
+    # A JS function that produces the CLI command based on the given config to start the MCP on stdio.
+    |-
+    (config) => {
+      const env = {
+        MEM_SERVER: config.serverUrl,
+        MEM_TOKEN: config.token,
+      };
+      if (config.workspace) {
+        env.MEM_WORKSPACE = config.workspace;
+      }
+      return {
+        command: "npx",
+        args: ["-y", "@fullstack-ai-infra/mem-mcp@latest"],
+        env,
+      };
+    }
+  exampleConfig:
+    serverUrl: "http://localhost:8787"
+    token: "replace-with-a-mem-bearer-token"
+    workspace: ""

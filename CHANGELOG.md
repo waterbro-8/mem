@@ -9,6 +9,17 @@ The project is not yet publishing stable semantic-versioned releases.
 
 ### Added
 
+- MCP discoverability surface for `mem-mcp` (#104 G1–G3): the README now carries
+  a mechanically parseable `## MCP Tools` table listing all 26 registered tools
+  (verified against a live `tools/list` response, and matching the set pinned by
+  `TestRegisterAll_RegistersExpectedToolNames`), `smithery.yaml` declares the
+  stdio launch config with `serverUrl`/`token`/`workspace` mapped onto
+  `MEM_SERVER`/`MEM_TOKEN`/`MEM_WORKSPACE`, and `.github/workflows/release.yml`
+  cross-compiles `mem-mcp` for linux/darwin (amd64, arm64) and windows (amd64,
+  arm64) with `CGO_ENABLED=0`, publishes `SHA256SUMS`, and opens a Release whose
+  body carries install and agent-connection instructions. The Smithery start
+  command targets the npm wrapper planned in #104 G4, so Smithery validation
+  cannot pass until that package is published.
 - `merge_conservative` workspace bundle restore: importing a validated
   bundle into an existing, possibly non-empty workspace now compares every
   bundle object against the target under the import lock by stable identity

@@ -1,0 +1,132 @@
+name: Release
+
+# Publishes the mem-mcp stdio binary as a GitHub Release with install
+# instructions and checksummed artifacts (issue #104 G1). Only mem-mcp is
+# released here; memd and the CLI remain on the CI build path.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  mem-mcp:
+    name: Build and publish mem-mcp
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      OUT_DIR: ${{ github.workspace }}/dist
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: server/go.mod
+
+      - name: Validate tag name
+        run: |
+          set -euo pipefail
+          # The `v*` trigger glob still admits refs like `v$(...)`, so the tag
+          # is asserted before it reaches filenames and the release API.
+          if ! printf '%s' "${GITHUB_REF_NAME}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "refusing to release non-semver tag: ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+
+      - name: Cross-compile mem-mcp
+        working-directory: server
+        run: |
+          set -euo pipefail
+          mkdir -p "${OUT_DIR}"
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            ext=""
+            if [ "${goos}" = "windows" ]; then
+              ext=".exe"
+            fi
+            out="${OUT_DIR}/mem-mcp-${GITHUB_REF_NAME}-${goos}-${goarch}${ext}"
+            CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" \
+              go build -trimpath -ldflags="-s -w" -o "${out}" ./cmd/mem-mcp
+            echo "built $(basename "${out}")"
+          done
+          cp ../LICENSE "${OUT_DIR}/LICENSE"
+
+      - name: Generate checksums
+        run: |
+          set -euo pipefail
+          cd "${OUT_DIR}"
+          sha256sum mem-mcp-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Write release notes
+        run: |
+          set -euo pipefail
+          cat > "${RUNNER_TEMP}/notes.md" <<EOF
+          ## Install
+
+          Download the binary for your platform and put it on your \`PATH\`.
+          Artifacts are named \`mem-mcp-${GITHUB_REF_NAME}-<os>-<arch>\` for linux
+          and darwin on amd64 and arm64, with \`.exe\` appended on windows.
+
+          \`\`\`bash
+          curl -Lo mem-mcp \\
+            https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/mem-mcp-${GITHUB_REF_NAME}-linux-amd64
+          chmod +x mem-mcp
+
+          curl -LO \\
+            https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/SHA256SUMS
+          sha256sum --ignore-missing -c SHA256SUMS
+          \`\`\`
+
+          ## Connect an Agent
+
+          \`mem-mcp\` speaks newline-delimited JSON-RPC over stdio and proxies tool
+          calls to a running memd API server. Configure the host with:
+
+          \`\`\`json
+          {
+            "mcpServers": {
+              "mem": {
+                "command": "/absolute/path/to/mem-mcp",
+                "env": {
+                  "MEM_SERVER": "http://localhost:8787",
+                  "MEM_TOKEN": "your-mem-bearer-token"
+                }
+              }
+            }
+          }
+          \`\`\`
+
+          Tokens are created with \`mem auth token create\`. See
+          [docs/mcp.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/mcp.md)
+          for the full tool surface and permission contract.
+
+          ## Known limitations
+
+          - The \`initialize\` handshake still self-reports version \`0.1.0\`; the
+            ldflags wire-up for \`serverInfo\` is tracked separately from this
+            release path.
+          - A \`mem-mcp\` npm wrapper and the official MCP Registry listing are
+            later milestones in ${GITHUB_REPOSITORY}#104 and are not provided by
+            this release.
+          EOF
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          args=(--title "mem-mcp ${GITHUB_REF_NAME}" --notes-file "${RUNNER_TEMP}/notes.md")
+          case "${GITHUB_REF_NAME}" in
+            *-*) args+=(--prerelease) ;;
+          esac
+          gh release create "${GITHUB_REF_NAME}" "${args[@]}" "${OUT_DIR}"/*

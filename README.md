@@ -117,6 +117,43 @@ forget 需要 `delete` 及允许删除的 workspace 角色。写入时关联
 `source_file_id` 还需 `read`。
 `source=all` 的调用方必须检查 `partial/warnings`，避免把单路降级当成完整召回。
 
+## MCP Tools
+
+`mem-mcp` is a stdio MCP server (protocol `2024-11-05`) that exposes the mem
+memory plane to agents. It currently registers **26 tools**; the tool names
+below are pinned by `TestRegisterAll_RegistersExpectedToolNames`. Argument
+schemas, permission requirements and error semantics are documented in
+[docs/mcp.md](docs/mcp.md).
+
+| Tool | Description |
+| --- | --- |
+| `mem_archive` | Reversibly exclude a memory from normal recall |
+| `mem_checkpoint` | Persist a versioned task checkpoint or an explicit handoff to another Agent/device |
+| `mem_checkpoint_get` | Get one immutable checkpoint and its full handoff payload |
+| `mem_checkpoint_list` | List newest-first bounded checkpoint summaries for one task |
+| `mem_context` | Build an evidence-backed context pack for the calling Agent |
+| `mem_durable_context_recall` | Resume explicitly granted, workspace-scoped active memories for one principal through the pinned `durable-context.v1` contract |
+| `mem_face` | Person clusters: `action=list` / `name` / `merge` |
+| `mem_feedback` | Record useful/not-useful or pin/unpin feedback with optimistic concurrency |
+| `mem_file_annotation_decide` | Accept or reject one pending AI description/tag suggestion |
+| `mem_folder_tree` | Full folder tree as nested structure |
+| `mem_forget` | Irreversibly redact one live memory payload after explicit confirmation |
+| `mem_get` | Read file content; binary returned base64-encoded, capped at 4 MiB |
+| `mem_info` | File metadata + AI fields (caption / summary / tags / timeline_at / index_status) |
+| `mem_list` | List files with filters (tag / mime-prefix / since / until / path-prefix) |
+| `mem_ls` | List immediate subfolders + files under a folder path |
+| `mem_memory_get` | Get one full structured memory by UUID within the token path boundary |
+| `mem_memory_list` | List bounded structured-memory summaries; `mem_list` remains the file list |
+| `mem_mkdir` | Create folder (mkdir -p semantics) |
+| `mem_mv` | Move file to a different folder, or rename in place |
+| `mem_put` | Upload content (text or base64 binary) and trigger AI indexing |
+| `mem_related` | Top-K files related to a `file_id` by embedding similarity |
+| `mem_remember` | Idempotently persist an observation, decision, preference, task state, fact, note or artifact reference |
+| `mem_restore` | Return an archived memory to normal recall |
+| `mem_resume` | Restore the current task head or a selected historical checkpoint, including resolved and missing evidence |
+| `mem_search` | Natural-language search (text / visual / auto fuse); ranked files + snippets |
+| `mem_task_list` | List bounded resumable-task summaries |
+
 ## 开发环境
 
 本地开发依赖：
