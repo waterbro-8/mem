@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// AC-005 with a real signal, not a cancelled context: SIGTERM must end the run
+// REQ-001 with D-1, evidenced with a real signal, not a cancelled context: SIGTERM must end the run
 // between cycles with no error. The test waits for the watcher's own startup
 // line so the handler is installed before the signal is sent.
 //

@@ -23,8 +23,11 @@ import (
 )
 
 // mem put <dir> --watch is the one-way local→mem watcher (SPEC.md:604, issue
-// #110). Its shape was adjudicated on the issue, and the four rulings are load
-// bearing enough that the code names them:
+// #110). #110 left four decisions open for tech adjudication; the rulings taken
+// here keep D-n to open decision n of the record, and are named in the code
+// because they are load bearing. The record is still `status: needs-design` with
+// no technical owner assigned, so these four are a proposal for owner sign-off,
+// not a settled decision:
 //
 //	D-1 foreground poll loop. No daemonize, no pidfile, no service unit, no
 //	    fsnotify. SIGINT/SIGTERM end the run between cycles with exit 0; one
@@ -66,7 +69,7 @@ const (
 // platform files; this is the error they share.
 var errWatchLocked = errors.New("watch lock held by another process")
 
-// watchStates and watchCodes are the closed sets AC-006 pins. The code set is
+// watchStates and watchCodes are the closed sets REQ-002 pins. The code set is
 // ingest's, not a watch-local alias for the same conditions.
 var (
 	watchStates = []string{"ingested", "deduped", "changed", "local_gone", "failed"}

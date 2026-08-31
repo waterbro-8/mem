@@ -299,7 +299,7 @@ func TestWatchTreatsMTimeOnlyChangeAsUnchanged(t *testing.T) {
 	}
 }
 
-// AC-009: a same-size in-place edit is detected by hash, reported as changed with
+// AC-001's "changed" half, per D-3: a same-size in-place edit is detected by hash, reported as changed with
 // the previously ingested id, and leaves the vault untouched across two cycles.
 func TestWatchReportsChangedWithoutReingesting(t *testing.T) {
 	st := newWatchStub(t)
@@ -445,7 +445,7 @@ func TestWatchFailingFileKeepsCycleGoing(t *testing.T) {
 	}
 }
 
-// AC-006: the emitted vocabulary is closed, in both directions.
+// REQ-002 with D-2: the emitted vocabulary is closed, in both directions.
 func TestWatchReportVocabularyIsClosed(t *testing.T) {
 	st := newWatchStub(t)
 	st.statusFor = func(name string) int {
@@ -554,7 +554,7 @@ func TestWatchJSONModeKeepsStdoutAPureReportStream(t *testing.T) {
 	}
 }
 
-// AC-007: every cycle appends one object, and the log stops growing at the cap.
+// REQ-002 with D-2: every cycle appends one object, and the log stops growing at the cap.
 func TestWatchReportLogAppendsAndCaps(t *testing.T) {
 	st := newWatchStub(t)
 	f := newWatchFixture(t, st, "/Docs")
@@ -593,7 +593,7 @@ func TestWatchReportLogAppendsAndCaps(t *testing.T) {
 	_ = st
 }
 
-// AC-005: a root that does not exist fails at startup with not_found, before any
+// REQ-001 with D-1: a root that does not exist fails at startup with not_found, before any
 // request is made.
 func TestWatchMissingRootExitsNotFound(t *testing.T) {
 	st := newWatchStub(t)
@@ -632,7 +632,7 @@ func TestWatchMissingRootExitsNotFound(t *testing.T) {
 	}
 }
 
-// AC-005: one watcher per root. A held lock fails a second watcher fast, with a
+// REQ-001 with D-1: one watcher per root. A held lock fails a second watcher fast, with a
 // hint that names the file an operator would have to look at.
 func TestWatchSecondWatcherFailsFast(t *testing.T) {
 	st := newWatchStub(t)
@@ -671,7 +671,7 @@ func TestWatchSecondWatcherFailsFast(t *testing.T) {
 	}
 }
 
-// AC-005: cancellation ends the run with no error, which the CLI turns into exit
+// REQ-001 with D-1: cancellation ends the run with no error, which the CLI turns into exit
 // 0. A stop request is a watcher's expected terminal state.
 func TestWatchCancellationExitsZero(t *testing.T) {
 	st := newWatchStub(t)
@@ -837,7 +837,7 @@ func TestWatchUploadCodeComesFromTheSharedClassifier(t *testing.T) {
 	}
 }
 
-// AC-008: the watcher's records live in the shared keyed store, so the transcript
+// D-4: the watcher's records live in the shared keyed store, so the transcript
 // sink and the file sink cannot drift on keying or atomicity.
 func TestWatchRecordsUseTheSharedKeyedStateStore(t *testing.T) {
 	st := newWatchStub(t)
