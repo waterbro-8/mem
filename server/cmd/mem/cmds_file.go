@@ -19,6 +19,8 @@ import (
 func newPutCmd() *cobra.Command {
 	var (
 		recursive  bool
+		watch      bool
+		interval   time.Duration
 		tag        []string
 		name       string
 		mimeFlag   string
@@ -64,15 +66,35 @@ func newPutCmd() *cobra.Command {
 				return errors.New("--url ingestion lands in W2; W1 supports local files and stdin only")
 			}
 			if len(args) == 0 {
-				return errors.New("usage: mem put <path> | mem put - | mem put <dir> --recursive")
+				return errors.New("usage: mem put <path> | mem put - | mem put <dir> --recursive | mem put <dir> --watch")
 			}
 
 			target := args[0]
 			if target == "-" {
+				if watch {
+					return errors.New("--watch needs a directory to poll; stdin is a one-shot source")
+				}
 				if name == "" {
 					return errors.New("--name required when reading from stdin")
 				}
 				return uploadStream(c, name, mimeFlag, toFolder, -1, tag, os.Stdin, sourceMetadata, format)
+			}
+
+			if watch {
+				if name != "" || mimeFlag != "" {
+					return errors.New("--watch takes no --name or --mime: each file keeps its own name and type")
+				}
+				w, err := newWatchRun(cmd, c, target, watchConfig{
+					interval:   interval,
+					to:         toFolder,
+					tags:       tag,
+					format:     format,
+					sourceMeta: sourceMetadata,
+				})
+				if err != nil {
+					return err
+				}
+				return w.run(cmd.Context())
 			}
 
 			st, err := os.Stat(target)
@@ -89,6 +111,7 @@ func newPutCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "recurse into directories")
+	bindWatchFlags(cmd, &watch, &interval)
 	cmd.Flags().StringArrayVar(&tag, "tag", nil, "tag(s) to attach (repeatable)")
 	cmd.Flags().StringVar(&name, "name", "", "override file name (required for stdin)")
 	cmd.Flags().StringVar(&mimeFlag, "mime", "", "override MIME type")

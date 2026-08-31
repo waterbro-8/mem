@@ -22,13 +22,18 @@
 //
 // Contract notes that matter for new call sites:
 //
-//   - The change decision is size-based, not content-hashed. A cursor records
-//     the file size at write time, and a file that has since become smaller is
-//     treated as rewritten so its cursor resets. Nothing compares content, so a
-//     same-size in-place edit is not detected here; adding a content gate is a
-//     decision to make, not an implementation detail of a call site.
+//   - The change decision belongs to the sink, not to Run. The memory plane
+//     (`mem ingest qoder`) is size-based: a cursor records the file size at write
+//     time, a file that has since become smaller is treated as rewritten so its
+//     cursor resets, and nothing compares content, so a same-size in-place edit
+//     is not detected. The file plane (`mem put --watch`) uses a content hash as
+//     its authority (see ContentHash), per the adjudication on #110 D-3. Neither
+//     is a general rule the other sink must adopt.
 //   - Cursors are keyed by the absolute path (see CursorPath). Keying on
 //     path-plus-device identity would invalidate existing on-disk cursors.
+//   - Every sink stores its state through the same keyed atomic writer
+//     (SaveCursor / SaveState), so an interrupted run cannot leave a half-written
+//     record behind in any of them. Only the record's shape differs.
 //   - --dry-run neither writes a request nor advances a cursor. Callers must
 //     not "optimize" by saving a cursor after a dry run.
 package ingest
@@ -36,10 +41,12 @@ package ingest
 import (
 	"context"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -232,12 +239,14 @@ func CursorPath(stateDir, abs string) string {
 // line numbers would be skipped forever.
 func LoadCursor(stateDir, abs string) Cursor {
 	var cp Cursor
-	b, err := os.ReadFile(CursorPath(stateDir, abs))
-	if err != nil {
-		return cp
-	}
-	if err := json.Unmarshal(b, &cp); err != nil {
+	found, err := loadState(CursorPath(stateDir, abs), &cp)
+	switch {
+	case errors.Is(err, ErrCorruptState):
 		return Cursor{Abs: abs, Corrupt: true}
+	case err != nil || !found:
+		// An unreadable record is treated as "nothing ingested", as it always
+		// was: broken state must not block a run.
+		return Cursor{}
 	}
 	if cp.Abs == "" {
 		cp.Abs = abs
@@ -253,26 +262,88 @@ func LoadCursor(stateDir, abs string) Cursor {
 // SaveCursor writes a cursor through a temporary file and an atomic rename, so
 // an interrupted run cannot leave a half-written checkpoint behind.
 func SaveCursor(stateDir string, cp Cursor) error {
-	p := CursorPath(stateDir, cp.Abs)
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return fmt.Errorf("create checkpoint dir: %w", err)
+	return saveState(CursorPath(stateDir, cp.Abs), cp, "checkpoint")
+}
+
+// ErrCorruptState reports a persisted record that exists but does not decode.
+var ErrCorruptState = errors.New("ingest: record does not decode")
+
+// StatePath returns the record file for one source path, keyed by a hash of its
+// absolute path so any source layout is safe to store in one directory. It is
+// CursorPath under its general name: one keying rule serves every sink.
+func StatePath(stateDir, abs string) string { return CursorPath(stateDir, abs) }
+
+// SaveState persists any record for one source path, keyed like a Cursor and
+// written with the same atomicity. A sink that tracks something other than a
+// line high-water mark (a content hash, a returned file id) uses this rather
+// than writing a second state layer.
+func SaveState(stateDir, abs string, v any) error {
+	return saveState(StatePath(stateDir, abs), v, "state")
+}
+
+// LoadState decodes the record for one source path into v. found is false when
+// nothing was stored yet; err is ErrCorruptState when a record exists but does
+// not decode, which a sink reports as CodeStateCorrupt instead of swallowing it.
+func LoadState(stateDir, abs string, v any) (found bool, err error) {
+	return loadState(StatePath(stateDir, abs), v)
+}
+
+func loadState(path string, v any) (bool, error) {
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
 	}
-	b, err := json.Marshal(cp)
 	if err != nil {
-		return fmt.Errorf("encode checkpoint: %w", err)
+		return false, err
 	}
-	tmp := p + ".tmp"
+	if err := json.Unmarshal(b, v); err != nil {
+		return false, fmt.Errorf("%w: %v", ErrCorruptState, err)
+	}
+	return true, nil
+}
+
+func saveState(path string, v any, noun string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create %s dir: %w", noun, err)
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", noun, err)
+	}
+	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return fmt.Errorf("write checkpoint: %w", err)
+		return fmt.Errorf("write %s: %w", noun, err)
 	}
-	if err := os.Rename(tmp, p); err != nil {
-		return fmt.Errorf("commit checkpoint: %w", err)
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("commit %s: %w", noun, err)
 	}
 	return nil
 }
 
-// FileState returns the size and UTC mtime recorded alongside a cursor. Both
-// are diagnostics: only size participates in the change decision.
+// ContentHash returns the hex SHA-256 of a file's bytes.
+//
+// It is the authority for a content-gated change decision, because size and
+// mtime both move without the bytes changing (rsync -t, touch, backup restores)
+// and both can stay put when bytes do change (a same-size in-place edit).
+//
+// It reads the whole file, so callers gate on FileState first: a directory of
+// unchanged files should cost no hashing at all.
+func ContentHash(abs string) (string, error) {
+	f, err := os.Open(abs)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// FileState returns the size and UTC mtime of a file, in the form a record
+// stores. The memory plane's cursor uses size alone; the file plane compares the
+// pair as its cheap gate before spending a read on ContentHash.
 func FileState(abs string) (size int64, mtime string, err error) {
 	fi, err := os.Stat(abs)
 	if err != nil {

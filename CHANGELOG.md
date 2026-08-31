@@ -7,6 +7,26 @@ The project publishes 0.x prerelease versions; a stable release line is not yet 
 
 ## [Unreleased]
 
+### Added
+
+- `mem put <dir> --watch` is a foreground one-way watcher over one local
+  directory (`#110`): it polls, uploads files it has not seen once they have been
+  quiet for a full interval, and never deletes, overwrites or re-uploads what
+  already landed. A `(size, mtime)` gate leaves unchanged files unread, so sha256
+  is the only authority: an mtime-only touch is reported `unchanged`, a real
+  content change is reported `changed` without re-ingesting it, and a local
+  deletion is reported `local_gone` while the stored copy and its record stay put.
+  Each cycle appends one report to
+  `~/.mem/watch/reports/<hash>.jsonl` (capped at the newest 200) using the closed
+  count and failure-code vocabulary `mem ingest` shares, and `--format json` puts
+  those lines on stdout with nothing else. One watcher per root is held by an
+  advisory lock; `SIGINT`/`SIGTERM` end the run between cycles with exit 0, a
+  missing root exits 2, and 10 consecutive cycles whose every upload was refused
+  for a non-retryable reason exit with that class's SPEC §7.1 code (3 auth, 4
+  plan/quota, 5 provider) instead of spinning silently. It builds on the shared
+  `server/internal/ingest` core (`#111`) rather than adding a second state layer.
+  See `docs/integrations/put-watch.md`.
+
 ### Changed
 
 - Internal, behaviour-preserving: the local ingestion mechanics used by
